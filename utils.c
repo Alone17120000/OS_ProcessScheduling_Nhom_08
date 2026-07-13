@@ -3,6 +3,8 @@
 #include "utils.h"
 #include "sjf.h"
 #include "srtn.h"
+#include "fcfs.h"
+#include "rr.h"
 
 void read_input(const char *filename, Process processes[], int *n) {
     FILE *file = fopen(filename, "r");
@@ -10,9 +12,7 @@ void read_input(const char *filename, Process processes[], int *n) {
         printf("Loi mo file!\n");
         exit(1);
     }
-
     fscanf(file, "%d", n);
-
     for (int i = 0; i < *n; i++) {
         processes[i].pid = i + 1;
         processes[i].state = 0; 
@@ -20,10 +20,8 @@ void read_input(const char *filename, Process processes[], int *n) {
         processes[i].is_new_arrival = false;
         
         fscanf(file, "%d", &processes[i].arrival_time);
-
         char c;
         int burst_idx = 0;
-        
         while (fscanf(file, "%d%c", &processes[i].bursts.cpu_burst[burst_idx], &c) == 2) {
             if (c == '\n' || c == '\r' || feof(file)) {
                 processes[i].bursts.r_burst[burst_idx] = 0;
@@ -39,11 +37,12 @@ void read_input(const char *filename, Process processes[], int *n) {
     fclose(file);
 }
 
-void simulate_scheduling(Process processes[], int n, int algo_type, const char *output_filename) {
+void simulate_scheduling(Process processes[], int n, int algo_type, int quantum, const char *output_filename) {
     int current_time = 0;
     int completed_processes = 0;
     int current_cpu_process = -1;
     int current_r_process = -1;
+    int rr_timer = 0;
 
     int gantt_cpu[1000];
     int gantt_r[1000];
@@ -59,7 +58,6 @@ void simulate_scheduling(Process processes[], int n, int algo_type, const char *
     }
 
     while (completed_processes < n && current_time < 1000) {
-        
         for (int i = 0; i < n; i++) {
             if (processes[i].state == 0 && processes[i].arrival_time == current_time) {
                 processes[i].state = 1;
@@ -69,11 +67,9 @@ void simulate_scheduling(Process processes[], int n, int algo_type, const char *
 
         if (current_r_process != -1) {
             processes[current_r_process].remaining_r_time--;
-            
             if (processes[current_r_process].remaining_r_time == 0) {
                 processes[current_r_process].current_burst_index++;
                 int next_idx = processes[current_r_process].current_burst_index;
-                
                 if (next_idx < processes[current_r_process].bursts.num_bursts) {
                     processes[current_r_process].state = 1;
                     processes[current_r_process].is_new_arrival = true;
@@ -89,6 +85,7 @@ void simulate_scheduling(Process processes[], int n, int algo_type, const char *
 
         if (current_cpu_process != -1) {
             processes[current_cpu_process].remaining_cpu_time--;
+            rr_timer++;
 
             if (algo_type == 4) {
                 int next_candidate = get_next_srtn(processes, n, current_time);
@@ -96,19 +93,18 @@ void simulate_scheduling(Process processes[], int n, int algo_type, const char *
                     processes[current_cpu_process].state = 1;
                     current_cpu_process = next_candidate;
                     processes[current_cpu_process].state = 2;
+                    rr_timer = 0;
                 }
             }
 
             if (processes[current_cpu_process].remaining_cpu_time == 0) {
                 int burst_idx = processes[current_cpu_process].current_burst_index;
-                
                 if (processes[current_cpu_process].bursts.r_burst[burst_idx] > 0) {
                     processes[current_cpu_process].state = 3;
                 } else {
                     processes[current_cpu_process].current_burst_index++;
                     int next_idx = processes[current_cpu_process].current_burst_index;
-                    
-                    if (next_idx < processes[current_cpu_process].bursts.num_bursts) {
+                    if (next_idx < processes[current_procs].bursts.num_bursts) {
                         processes[current_cpu_process].state = 1;
                         processes[current_cpu_process].remaining_cpu_time = processes[current_cpu_process].bursts.cpu_burst[next_idx];
                         processes[current_cpu_process].remaining_r_time = processes[current_cpu_process].bursts.r_burst[next_idx];
@@ -118,19 +114,21 @@ void simulate_scheduling(Process processes[], int n, int algo_type, const char *
                     }
                 }
                 current_cpu_process = -1;
+                rr_timer = 0;
+            } else if (algo_type == 2 && rr_timer == quantum) {
+                processes[current_cpu_process].state = 1;
+                current_cpu_process = -1;
+                rr_timer = 0;
             }
         }
 
         if (current_cpu_process == -1) {
-            if (algo_type == 4) {
-                current_cpu_process = get_next_srtn(processes, n, current_time);
-            } else if (algo_type == 3) {
-                current_cpu_process = get_next_sjf(processes, n, current_time);
-            }
+            if (algo_type == 1) current_cpu_process = get_next_fcfs(processes, n, current_time);
+            else if (algo_type == 2) current_cpu_process = get_next_rr(processes, n, current_time, quantum, &rr_timer);
+            else if (algo_type == 3) current_cpu_process = get_next_sjf(processes, n, current_time);
+            else if (algo_type == 4) current_cpu_process = get_next_srtn(processes, n, current_time);
             
-            if (current_cpu_process != -1) {
-                processes[current_cpu_process].state = 2;
-            }
+            if (current_cpu_process != -1) processes[current_cpu_process].state = 2;
         }
 
         if (current_r_process == -1) {
@@ -146,30 +144,15 @@ void simulate_scheduling(Process processes[], int n, int algo_type, const char *
         gantt_cpu[current_time] = current_cpu_process;
         gantt_r[current_time] = current_r_process;
 
-        for (int i = 0; i < n; i++) {
-            processes[i].is_new_arrival = false;
-        }
-
+        for (int i = 0; i < n; i++) processes[i].is_new_arrival = false;
         current_time++;
     }
 
     FILE *out_file = fopen(output_filename, "w");
     if (out_file) {
-        for(int i = 0; i < current_time; i++) {
-            if(gantt_cpu[i] != -1) fprintf(out_file, "%d ", processes[gantt_cpu[i]].pid);
-            else fprintf(out_file, "_ ");
-        }
+        for(int i = 0; i < current_time; i++) fprintf(out_file, "%s ", (gantt_cpu[i] != -1) ? (char[]){(char)(processes[gantt_cpu[i]].pid + '0'), 0} : "_");
         fprintf(out_file, "\n");
-        
-        for(int i = 0; i < current_time; i++) {
-            if(gantt_r[i] != -1) fprintf(out_file, "%d ", processes[gantt_r[i]].pid);
-            else fprintf(out_file, "_ ");
-        }
-        fprintf(out_file, "\n");
-        
+        for(int i = 0; i < current_time; i++) fprintf(out_file, "%s ", (gantt_r[i] != -1) ? (char[]){(char)(processes[gantt_r[i]].pid + '0'), 0} : "_");
         fclose(out_file);
-        printf("Da ghi so do Gantt thanh cong vao file %s!\n", output_filename);
-    } else {
-        printf("Loi khong the tao file output!\n");
     }
 }

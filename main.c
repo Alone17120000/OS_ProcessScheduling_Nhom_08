@@ -6,13 +6,15 @@
 int main(int argc, char *argv[]) {
     if (argc < 4) {
         printf("Loi: Thieu tham so!\n");
-        printf("Cach dung: %s <Input_file> <Output_file> <Algorithm>\n", argv[0]);
+        printf("Cach dung: %s <Input_file> <Output_file> <Algorithm> [Quantum]\n", argv[0]);
         return 1;
     }
 
     char *inputFile = argv[1];
     char *outputFile = argv[2];
     int algo_type = atoi(argv[3]);
+    int quantum = (argc >= 5) ? atoi(argv[4]) : 2; 
+
     Process processes[MAX_PROCESSES];
     int n;
 
@@ -29,7 +31,7 @@ int main(int argc, char *argv[]) {
     }
     printf("--------------------------------------\n");
 
-    simulate_scheduling(processes, n, algo_type, outputFile);
+    simulate_scheduling(processes, n, algo_type, quantum, outputFile);
 
     return 0;
 }
